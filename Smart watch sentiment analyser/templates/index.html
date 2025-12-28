@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smartwatch Sentiment Analyzer</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>⌚ Smartwatch Sentiment Analyzer</h1>
+            <p class="subtitle">Compare Classical ML vs Transformer Models with Sentence-Level Analysis</p>
+        </header>
+
+        <div class="main-content">
+            <div class="input-section">
+                <h2>Enter Review Text</h2>
+                <textarea 
+                    id="reviewText" 
+                    placeholder="Enter a smartwatch review here... Example: 'This watch is amazing! Great battery life and accurate fitness tracking. However, the app could be better.'"
+                    rows="6"
+                ></textarea>
+                <button id="analyzeBtn" onclick="analyzeSentiment()">Analyze Sentiment</button>
+            </div>
+
+            <div class="results-section" id="resultsSection" style="display: none;">
+                <h2>Analysis Results</h2>
+                
+                <div class="ml-models-section">
+                    <h3>Classical ML Model (Naive Bayes)</h3>
+                    <div class="models-grid" id="mlModelsGrid">
+                        <!-- ML model will be inserted here -->
+                    </div>
+                </div>
+
+                <div class="transformer-section">
+                    <h3>Transformer Model</h3>
+                    <div class="model-card transformer">
+                        <div class="sentiment-display">
+                            <span class="sentiment-label" id="transformerSentiment">-</span>
+                            <span class="confidence" id="transformerConfidence">-</span>
+                        </div>
+                        <p class="model-info">RoBERTa Sentiment Model</p>
+                    </div>
+                </div>
+
+                <div class="sentence-analysis" id="sentenceAnalysis" style="display: none;">
+                    <h3>Sentence-Level Analysis (Transformer Model)</h3>
+                    <div id="sentencesContainer"></div>
+                </div>
+            </div>
+        </div>
+
+        <footer>
+            <p>Built with Flask, Scikit-learn, and Transformers</p>
+        </footer>
+    </div>
+
+    <script>
+        async function analyzeSentiment() {
+            const text = document.getElementById('reviewText').value.trim();
+            
+            if (!text) {
+                alert('Please enter some text to analyze');
+                return;
+            }
+
+            const btn = document.getElementById('analyzeBtn');
+            btn.disabled = true;
+            btn.textContent = 'Analyzing...';
+
+            try {
+                const response = await fetch('/analyze', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ text: text })
+                });
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    let errorData;
+                    try {
+                        errorData = JSON.parse(errorText);
+                    } catch {
+                        errorData = { error: errorText || `HTTP ${response.status}` };
+                    }
+                    alert('Error: ' + (errorData.error || `HTTP ${response.status}`));
+                    btn.disabled = false;
+                    btn.textContent = 'Analyze Sentiment';
+                    return;
+                }
+
+                const data = await response.json();
+                console.log('Response data:', data);
+
+                if (data.error) {
+                    alert('Error: ' + data.error);
+                    btn.disabled = false;
+                    btn.textContent = 'Analyze Sentiment';
+                    return;
+                }
+                
+                if (!data) {
+                    alert('Error: No data received from server');
+                    btn.disabled = false;
+                    btn.textContent = 'Analyze Sentiment';
+                    return;
+                }
+                
+                // Ensure we have at least some data to display
+                if (!data.classical_ml && !data.transformer && (!data.all_ml_models || Object.keys(data.all_ml_models).length === 0)) {
+                    alert('Error: No model predictions received. Models may not be loaded. Check server console.');
+                    btn.disabled = false;
+                    btn.textContent = 'Analyze Sentiment';
+                    return;
+                }
+
+                // Helper function to get model info
+                function getModelInfo(name) {
+                    const info = {
+                        'Naive Bayes': 'MultinomialNB with TF-IDF'
+                    };
+                    return info[name] || 'ML Model';
+                }
+                
+                // Display all Classical ML models
+                const mlGrid = document.getElementById('mlModelsGrid');
+                if (!mlGrid) {
+                    console.error('ML models grid not found');
+                    alert('Error: ML models grid not found');
+                    btn.disabled = false;
+                    btn.textContent = 'Analyze Sentiment';
+                    return;
+                }
+                mlGrid.innerHTML = '';
+                
+                // Check if we have ML models to display
+                const hasMLModels = data.all_ml_models && Object.keys(data.all_ml_models).length > 0;
+                const hasClassicalML = data.classical_ml && data.classical_ml.sentiment;
+                
+                if (hasMLModels) {
+                    Object.entries(data.all_ml_models).forEach(([name, result]) => {
+                        const modelCard = document.createElement('div');
+                        modelCard.className = 'model-card classical';
+                        
+                        // Sanitize name for ID (remove spaces)
+                        const sanitizedName = name.replace(/\s+/g, '');
+                        const sentimentId = sanitizedName + 'Sentiment';
+                        
+                        modelCard.innerHTML = `
+                            <h3>${name}</h3>
+                            <div class="sentiment-display">
+                                <span class="sentiment-label" id="${sentimentId}">${result.sentiment.toUpperCase()}</span>
+                                <span class="confidence">${result.confidence}%</span>
+                            </div>
+                            <p class="model-info">${getModelInfo(name)}</p>
+                        `;
+                        
+                        mlGrid.appendChild(modelCard);
+                        
+                        // Update color after element is in DOM
+                        setTimeout(() => {
+                            updateSentimentColor(sentimentId, result.sentiment);
+                        }, 10);
+                    });
+                } else if (hasClassicalML) {
+                    // Fallback to single model display (Naive Bayes)
+                    const modelCard = document.createElement('div');
+                    modelCard.className = 'model-card classical';
+                    modelCard.innerHTML = `
+                        <h3>Classical ML Model (Naive Bayes)</h3>
+                        <div class="sentiment-display">
+                            <span class="sentiment-label" id="classicalSentiment">${data.classical_ml.sentiment.toUpperCase()}</span>
+                            <span class="confidence">${data.classical_ml.confidence}%</span>
+                        </div>
+                        <p class="model-info">Best Performing Model</p>
+                    `;
+                    mlGrid.appendChild(modelCard);
+                    
+                    // Update color after element is in DOM
+                    setTimeout(() => {
+                        updateSentimentColor('classicalSentiment', data.classical_ml.sentiment);
+                    }, 10);
+                } else {
+                    // No ML models available - show message
+                    const noModelCard = document.createElement('div');
+                    noModelCard.className = 'model-card classical';
+                    noModelCard.innerHTML = `
+                        <h3>Classical ML Models</h3>
+                        <p style="color: #666; padding: 20px;">Models are still training or not available. Please wait and try again.</p>
+                    `;
+                    mlGrid.appendChild(noModelCard);
+                }
+
+                // Display Transformer results
+                if (data.transformer) {
+                    const transformerSentimentEl = document.getElementById('transformerSentiment');
+                    const transformerConfidenceEl = document.getElementById('transformerConfidence');
+                    
+                    if (transformerSentimentEl) {
+                        transformerSentimentEl.textContent = data.transformer.sentiment.toUpperCase();
+                        updateSentimentColor('transformerSentiment', data.transformer.sentiment);
+                    }
+                    if (transformerConfidenceEl) {
+                        transformerConfidenceEl.textContent = data.transformer.confidence + '%';
+                    }
+                }
+
+                // Display sentence-level analysis
+                const sentencesContainer = document.getElementById('sentencesContainer');
+                const sentenceAnalysis = document.getElementById('sentenceAnalysis');
+                
+                if (sentencesContainer) {
+                    sentencesContainer.innerHTML = '';
+
+                    if (data.sentences && data.sentences.length > 0) {
+                        data.sentences.forEach((sentenceData, index) => {
+                            const sentenceDiv = document.createElement('div');
+                            sentenceDiv.className = 'sentence-item';
+                            
+                            const sentimentClass = sentenceData.sentiment.toLowerCase();
+                            sentenceDiv.innerHTML = `
+                                <div class="sentence-content">
+                                    <span class="sentence-number">${index + 1}.</span>
+                                    <span class="sentence-text">${sentenceData.sentence}</span>
+                                </div>
+                                <div class="sentence-sentiment">
+                                    <span class="sentence-label ${sentimentClass}">${sentenceData.sentiment.toUpperCase()}</span>
+                                    <span class="sentence-confidence">${sentenceData.confidence}%</span>
+                                </div>
+                            `;
+                            
+                            sentencesContainer.appendChild(sentenceDiv);
+                        });
+                        
+                        if (sentenceAnalysis) {
+                            sentenceAnalysis.style.display = 'block';
+                        }
+                    } else {
+                        if (sentenceAnalysis) {
+                            sentenceAnalysis.style.display = 'none';
+                        }
+                    }
+                }
+
+                // Always show results section
+                const resultsSection = document.getElementById('resultsSection');
+                if (resultsSection) {
+                    resultsSection.style.display = 'block';
+                } else {
+                    console.error('Results section not found!');
+                    alert('Error: Results section not found in page');
+                }
+            } catch (error) {
+                alert('Error: ' + error.message);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Analyze Sentiment';
+            }
+        }
+
+        function updateSentimentColor(elementId, sentiment) {
+            const element = document.getElementById(elementId);
+            if (!element) {
+                console.warn(`Element with id '${elementId}' not found`);
+                return;
+            }
+            
+            element.className = 'sentiment-label';
+            
+            if (sentiment === 'positive') {
+                element.classList.add('positive');
+            } else if (sentiment === 'negative') {
+                element.classList.add('negative');
+            } else {
+                element.classList.add('neutral');
+            }
+        }
+    </script>
+</body>
+</html>
